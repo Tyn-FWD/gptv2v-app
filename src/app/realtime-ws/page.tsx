@@ -9,6 +9,9 @@ export default function RealtimeWebSocketPage() {
   const [isActive, setIsActive] = useState(false);
   const [transcript, setTranscript] = useState<string[]>([]);
   const currentAudio = useRef<HTMLAudioElement | null>(null);
+  const audioQueue = useRef<string[]>([]);
+  const isPlaying = useRef(false);
+  const segmentBuffer = useRef<Uint8Array[]>([]);
 
   useEffect(() => {
     if (!isActive) return;
@@ -22,7 +25,6 @@ export default function RealtimeWebSocketPage() {
     let audioContext: AudioContext;
     let workletNode: AudioWorkletNode;
     let source: MediaStreamAudioSourceNode;
-    let audioChunks: Uint8Array[] = [];
 
     function encodeToBase64(buffer: ArrayBuffer): string {
       const bytes = new Uint8Array(buffer);
@@ -76,6 +78,24 @@ export default function RealtimeWebSocketPage() {
       return wavData;
     }
 
+    function playNextAudio() {
+      if (isPlaying.current || audioQueue.current.length === 0) return;
+
+      const nextUrl = audioQueue.current.shift();
+      if (!nextUrl) return;
+
+      const audio = new Audio(nextUrl);
+      isPlaying.current = true;
+      currentAudio.current = audio;
+
+      audio.play().catch(console.warn);
+
+      audio.onended = () => {
+        isPlaying.current = false;
+        playNextAudio();
+      };
+    }
+
     ws.onopen = async () => {
       console.log("WebSocket connection established");
       setStatus("Connected - Initializing Audio");
@@ -103,13 +123,12 @@ export default function RealtimeWebSocketPage() {
       ws.send(JSON.stringify({
         type: "session.update",
         session: {
-            instructions: "You are Rico, an insurance Customer from the Phillipines. You are very angry and impatient.",
-            input_audio_format: "pcm16",
-            output_audio_format: "pcm16",
-            voice: "ash"
+          instructions: "You are Rico, an insurance Customer from the Phillipines. You are very angry and impatient.",
+          input_audio_format: "pcm16",
+          output_audio_format: "pcm16",
+          voice: "ash"
         }
       }));
-
 
       setStatus("Streaming audio to Azure...");
 
@@ -126,32 +145,48 @@ export default function RealtimeWebSocketPage() {
 
         if (serverEvent.type === "response.audio.delta" && serverEvent.delta) {
           const chunk = decodeBase64ToUint8Array(serverEvent.delta);
-          audioChunks.push(chunk);
+          segmentBuffer.current.push(chunk);
+
+          const bufferedLength = segmentBuffer.current.reduce((acc, c) => acc + c.length, 0);
+          if (bufferedLength >= 24000) {
+            const segment = new Uint8Array(bufferedLength);
+            let offset = 0;
+            for (const c of segmentBuffer.current) {
+              segment.set(c, offset);
+              offset += c.length;
+            }
+            segmentBuffer.current = [];
+
+            const wavData = createWavFile(segment, 24000);
+            const blob = new Blob([wavData], { type: "audio/wav" });
+            const url = URL.createObjectURL(blob);
+            audioQueue.current.push(url);
+            playNextAudio();
+          }
         } else if (serverEvent.type === "response.audio.done") {
-          const totalLength = audioChunks.reduce((acc, chunk) => acc + chunk.length, 0);
-          const allChunks = new Uint8Array(totalLength);
-          let offset = 0;
-          for (const chunk of audioChunks) {
-            allChunks.set(chunk, offset);
-            offset += chunk.length;
+          if (segmentBuffer.current.length > 0) {
+            const bufferedLength = segmentBuffer.current.reduce((acc, c) => acc + c.length, 0);
+            const segment = new Uint8Array(bufferedLength);
+            let offset = 0;
+            for (const c of segmentBuffer.current) {
+              segment.set(c, offset);
+              offset += c.length;
+            }
+            segmentBuffer.current = [];
+
+            const wavData = createWavFile(segment, 24000);
+            const blob = new Blob([wavData], { type: "audio/wav" });
+            const url = URL.createObjectURL(blob);
+            audioQueue.current.push(url);
+            playNextAudio();
           }
-          audioChunks = []; // clear buffer
-
-          const wavData = createWavFile(allChunks, 24000);
-          const blob = new Blob([wavData], { type: "audio/wav" });
-          const audioUrl = URL.createObjectURL(blob);
-
-          if (currentAudio.current) {
-            currentAudio.current.pause();
-            currentAudio.current.currentTime = 0;
-          }
-
-          const audio = new Audio(audioUrl);
-          currentAudio.current = audio;
-          audio.play().catch(err => console.warn("Audio playback error:", err));
         } else if (serverEvent.type === "response.audio_transcript.done") {
           if (serverEvent.transcript) {
-            setTranscript(prev => [...prev, serverEvent.transcript]);
+            setTranscript(prev => [...prev, `Rico: ${serverEvent.transcript}`]);
+          }
+        } else if (serverEvent.type === "conversation.item.input_audio_transcription.completed") {
+          if (serverEvent.transcript) {
+            setTranscript(prev => [...prev, `Agent: ${serverEvent.transcript}`]);
           }
         } else if (serverEvent.type === "error") {
           console.error("Azure Realtime Error:", serverEvent.error.message);
@@ -212,7 +247,7 @@ export default function RealtimeWebSocketPage() {
           <h2 className="text-md font-semibold">📝 Transcript</h2>
           <div className="bg-white text-black p-4 rounded-lg text-sm whitespace-pre-line">
             {transcript.map((line, i) => (
-              <p key={i}>Rico: {line}</p>
+              <p key={i}>{line}</p>
             ))}
           </div>
         </div>
