@@ -101,10 +101,10 @@ export default function RealtimeWebSocketPage() {
       ws.send(JSON.stringify({
         type: "session.update",
         session: {
-          instructions: "You are a helpful assistant that replies in voice.",
+          instructions: "You are Rico, an insurance Customer from the Phillipines. You like to mix in Tagalog in your speech. You are very angry and impatient.",
           input_audio_format: "pcm16",
           output_audio_format: "pcm16",
-          voice: "sage"
+          voice: "ash"
         }
       }));
 
@@ -147,7 +147,7 @@ export default function RealtimeWebSocketPage() {
           }
           audioChunks = []; // clear buffer
 
-          const wavData = createWavFile(allChunks);
+          const wavData = createWavFile(allChunks,24000);
           const blob = new Blob([wavData], { type: "audio/wav" });
           const audioUrl = URL.createObjectURL(blob);
           const audio = new Audio(audioUrl);
