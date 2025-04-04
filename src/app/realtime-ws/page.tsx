@@ -7,6 +7,8 @@ export default function RealtimeWebSocketPage() {
   const audioRef = useRef<HTMLAudioElement>(null);
   const [status, setStatus] = useState("Idle");
   const [isActive, setIsActive] = useState(false);
+  const [transcript, setTranscript] = useState<string[]>([]);
+  const currentAudio = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => {
     if (!isActive) return;
@@ -41,7 +43,7 @@ export default function RealtimeWebSocketPage() {
       return bytes;
     }
 
-    function createWavFile(pcmData: Uint8Array, sampleRate = 16000, numChannels = 1): Uint8Array {
+    function createWavFile(pcmData: Uint8Array, sampleRate = 24000, numChannels = 1): Uint8Array {
       const byteRate = sampleRate * numChannels * 2;
       const blockAlign = numChannels * 2;
       const wavHeader = new ArrayBuffer(44);
@@ -101,26 +103,13 @@ export default function RealtimeWebSocketPage() {
       ws.send(JSON.stringify({
         type: "session.update",
         session: {
-          instructions: "You are Rico, an insurance Customer from the Phillipines. You like to mix in Tagalog in your speech. You are very angry and impatient.",
-          input_audio_format: "pcm16",
-          output_audio_format: "pcm16",
-          voice: "ash"
+            instructions: "You are Rico, an insurance Customer from the Phillipines. You are very angry and impatient.",
+            input_audio_format: "pcm16",
+            output_audio_format: "pcm16",
+            voice: "ash"
         }
       }));
 
-      ws.send(JSON.stringify({
-        type: "conversation.item.create",
-        item: {
-          type: "message",
-          role: "user",
-          content: [
-            {
-              type: "input_text",
-              text: "<CONTINUE_CONVERSATION>"
-            }
-          ]
-        }
-      }));
 
       setStatus("Streaming audio to Azure...");
 
@@ -134,6 +123,7 @@ export default function RealtimeWebSocketPage() {
     ws.onmessage = (e) => {
       try {
         const serverEvent = JSON.parse(e.data);
+
         if (serverEvent.type === "response.audio.delta" && serverEvent.delta) {
           const chunk = decodeBase64ToUint8Array(serverEvent.delta);
           audioChunks.push(chunk);
@@ -147,17 +137,28 @@ export default function RealtimeWebSocketPage() {
           }
           audioChunks = []; // clear buffer
 
-          const wavData = createWavFile(allChunks,24000);
+          const wavData = createWavFile(allChunks, 24000);
           const blob = new Blob([wavData], { type: "audio/wav" });
           const audioUrl = URL.createObjectURL(blob);
+
+          if (currentAudio.current) {
+            currentAudio.current.pause();
+            currentAudio.current.currentTime = 0;
+          }
+
           const audio = new Audio(audioUrl);
+          currentAudio.current = audio;
           audio.play().catch(err => console.warn("Audio playback error:", err));
+        } else if (serverEvent.type === "response.audio_transcript.done") {
+          if (serverEvent.transcript) {
+            setTranscript(prev => [...prev, serverEvent.transcript]);
+          }
         } else if (serverEvent.type === "error") {
           console.error("Azure Realtime Error:", serverEvent.error.message);
           if (serverEvent.error.param) {
             console.error("Missing or invalid parameter:", serverEvent.error.param);
           }
-        } else {
+        } else if (serverEvent.type !== "response.audio_transcript.delta") {
           console.log("Event from model:", serverEvent);
         }
       } catch (err) {
@@ -205,6 +206,17 @@ export default function RealtimeWebSocketPage() {
         </button>
       </div>
       <audio ref={audioRef} autoPlay hidden />
+
+      {transcript.length > 0 && (
+        <div className="mt-6 space-y-2">
+          <h2 className="text-md font-semibold">📝 Transcript</h2>
+          <div className="bg-white text-black p-4 rounded-lg text-sm whitespace-pre-line">
+            {transcript.map((line, i) => (
+              <p key={i}>Rico: {line}</p>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
