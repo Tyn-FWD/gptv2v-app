@@ -30,16 +30,18 @@ export default function RealtimeWebSocketPage() {
       let source: MediaStreamAudioSourceNode;
 
       let instructionsText = "";
-      let settingsJson: Record<string, any> = {};
+      let settingsJson: Record<string, unknown> = {};
       try {
         const basePath = `/prompts/${promptName}`;
 
         const instructionsRes = await fetch(`${basePath}/instructions.txt`);
         if (!instructionsRes.ok) throw new Error("Prompt instructions not found");
         instructionsText = await instructionsRes.text();
+        console.log("Instructions: ", instructionsText)
 
         const settingsRes = await fetch(`${basePath}/settings.json`);
         if (settingsRes.ok) settingsJson = await settingsRes.json();
+        console.log("Settings: ", settingsJson)
 
       } catch {
         setStatus("⚠️ Failed to load prompt files");
@@ -154,6 +156,21 @@ export default function RealtimeWebSocketPage() {
             output_audio_format: "pcm16"
           }
         }));
+
+        ws.send(JSON.stringify({
+          type: "conversation.item.create",
+          "previous_item_id": null,
+          item: {
+              type: "message",
+              role: "user",
+              content: [
+                  {
+                      "type": "input_text",
+                      "text": "Hi Rico, how can I help you?"
+                  }
+              ]
+          }
+      }));
 
         setStatus("Streaming audio to Azure...");
 
