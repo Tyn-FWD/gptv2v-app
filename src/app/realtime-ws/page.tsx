@@ -9,7 +9,6 @@ export default function RealtimeWebSocketPage() {
   const [transcript, setTranscript] = useState<string[]>([]);
   const [bufferThreshold, setBufferThreshold] = useState(9600);
   const segmentBuffer = useRef<Uint8Array[]>([]);
-  const audioQueue = useRef<Uint8Array[]>([]);
   const audioContextRef = useRef<AudioContext | null>(null);
   const nextAudioTime = useRef(0);
 
@@ -198,7 +197,7 @@ export default function RealtimeWebSocketPage() {
           } else if (serverEvent.type !== "response.audio_transcript.delta") {
             console.log("Event from model:", serverEvent);
           }
-        } catch (err) {
+        } catch {
           console.warn("Non-JSON message or parse error:", e.data);
         }
       };
