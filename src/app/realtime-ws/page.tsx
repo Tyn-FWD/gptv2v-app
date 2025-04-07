@@ -2,11 +2,9 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useSearchParams } from "next/navigation";
 
 export default function RealtimeWebSocketPage() {
-  const searchParams = useSearchParams();
-  const promptName = searchParams.get("prompt") || "default";
+  const [promptName, setPromptName] = useState("default");
   const [status, setStatus] = useState("Idle");
   const [isActive, setIsActive] = useState(false);
   const [transcript, setTranscript] = useState<string[]>([]);
@@ -14,6 +12,12 @@ export default function RealtimeWebSocketPage() {
   const segmentBuffer = useRef<Uint8Array[]>([]);
   const audioContextRef = useRef<AudioContext | null>(null);
   const nextAudioTime = useRef(0);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const prompt = params.get("prompt");
+    if (prompt) setPromptName(prompt);
+  }, []);
 
   useEffect(() => {
     if (!isActive) return;
@@ -30,18 +34,16 @@ export default function RealtimeWebSocketPage() {
       let source: MediaStreamAudioSourceNode;
 
       let instructionsText = "";
-      let settingsJson: Record<string, unknown> = {};
+      let settingsJson: Record<string, any> = {};
       try {
         const basePath = `/prompts/${promptName}`;
 
         const instructionsRes = await fetch(`${basePath}/instructions.txt`);
         if (!instructionsRes.ok) throw new Error("Prompt instructions not found");
         instructionsText = await instructionsRes.text();
-        console.log("Instructions: ", instructionsText)
 
         const settingsRes = await fetch(`${basePath}/settings.json`);
         if (settingsRes.ok) settingsJson = await settingsRes.json();
-        console.log("Settings: ", settingsJson)
 
       } catch {
         setStatus("⚠️ Failed to load prompt files");
@@ -166,7 +168,7 @@ export default function RealtimeWebSocketPage() {
               content: [
                   {
                       "type": "input_text",
-                      "text": "Hi Rico, how can I help you?"
+                      "text": "Hi "+speakerName+ " how can I help you?"
                   }
               ]
           }
