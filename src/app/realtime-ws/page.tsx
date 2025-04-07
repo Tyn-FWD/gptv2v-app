@@ -2,6 +2,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 
 export default function RealtimeWebSocketPage() {
   const [status, setStatus] = useState("Idle");
@@ -11,6 +12,10 @@ export default function RealtimeWebSocketPage() {
   const segmentBuffer = useRef<Uint8Array[]>([]);
   const audioContextRef = useRef<AudioContext | null>(null);
   const nextAudioTime = useRef(0);
+  const searchParams = useSearchParams();
+  const promptName = searchParams.get("prompt") || "instructions";
+  const promptUrl = `/prompts/${promptName}.txt`;
+
 
   useEffect(() => {
     if (!isActive) return;
@@ -26,7 +31,7 @@ export default function RealtimeWebSocketPage() {
       let workletNode: AudioWorkletNode;
       let source: MediaStreamAudioSourceNode;
 
-      const instructionsText = await fetch("/prompts/instructions.txt").then(res => res.text());
+      const instructionsText = await fetch(promptUrl).then(res => res.text());
       console.log("Prompt:",instructionsText)
       function encodeToBase64(buffer: ArrayBuffer): string {
         const bytes = new Uint8Array(buffer);
