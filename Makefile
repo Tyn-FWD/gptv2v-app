@@ -7,4 +7,4 @@ dev:
 serve:
 	docker compose -f docker-compose.prod.yaml down
 	docker compose -f docker-compose.prod.yaml up -d
-	docker logs gpt-v2v -f
+	docker logs gptv2v-app-frontend-1 -f
