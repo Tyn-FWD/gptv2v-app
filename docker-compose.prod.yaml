@@ -1,0 +1,9 @@
+services:
+  frontend:
+    image: gpt-v2v
+    restart: always
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+    command: ["npm", "start"]
