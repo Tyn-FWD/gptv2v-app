@@ -5,6 +5,8 @@ import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 
 export default function RealtimeWebSocketPage() {
+  const searchParams = useSearchParams();
+  const promptName = searchParams.get("prompt") || "default";
   const [status, setStatus] = useState("Idle");
   const [isActive, setIsActive] = useState(false);
   const [transcript, setTranscript] = useState<string[]>([]);
@@ -12,10 +14,6 @@ export default function RealtimeWebSocketPage() {
   const segmentBuffer = useRef<Uint8Array[]>([]);
   const audioContextRef = useRef<AudioContext | null>(null);
   const nextAudioTime = useRef(0);
-  const searchParams = useSearchParams();
-  const promptName = searchParams.get("prompt") || "instructions";
-  const promptUrl = `/prompts/${promptName}.txt`;
-
 
   useEffect(() => {
     if (!isActive) return;
@@ -31,8 +29,26 @@ export default function RealtimeWebSocketPage() {
       let workletNode: AudioWorkletNode;
       let source: MediaStreamAudioSourceNode;
 
-      const instructionsText = await fetch(promptUrl).then(res => res.text());
-      console.log("Prompt:",instructionsText)
+      let instructionsText = "";
+      let settingsJson: Record<string, any> = {};
+      try {
+        const basePath = `/prompts/${promptName}`;
+
+        const instructionsRes = await fetch(`${basePath}/instructions.txt`);
+        if (!instructionsRes.ok) throw new Error("Prompt instructions not found");
+        instructionsText = await instructionsRes.text();
+
+        const settingsRes = await fetch(`${basePath}/settings.json`);
+        if (settingsRes.ok) settingsJson = await settingsRes.json();
+
+      } catch {
+        setStatus("⚠️ Failed to load prompt files");
+        return;
+      }
+
+      const speakerName = settingsJson.name || "Agent";
+      const gptParams = settingsJson.gpt_params || {};
+
       function encodeToBase64(buffer: ArrayBuffer): string {
         const bytes = new Uint8Array(buffer);
         let binary = "";
@@ -133,12 +149,9 @@ export default function RealtimeWebSocketPage() {
           type: "session.update",
           session: {
             instructions: instructionsText,
+            ...gptParams,
             input_audio_format: "pcm16",
-            output_audio_format: "pcm16",
-            voice: "ash",
-            input_audio_transcription: {
-              model: "whisper-1"
-            }
+            output_audio_format: "pcm16"
           }
         }));
 
@@ -188,7 +201,7 @@ export default function RealtimeWebSocketPage() {
             }
           } else if (serverEvent.type === "response.audio_transcript.done") {
             if (serverEvent.transcript) {
-              setTranscript(prev => [...prev, `Rico: ${serverEvent.transcript}`]);
+              setTranscript(prev => [...prev, `${speakerName}: ${serverEvent.transcript}`]);
             }
           } else if (serverEvent.type === "conversation.item.input_audio_transcription.completed") {
             if (serverEvent.transcript) {
@@ -223,7 +236,7 @@ export default function RealtimeWebSocketPage() {
     return () => {
       setStatus("Idle");
     };
-  }, [isActive, bufferThreshold]);
+  }, [isActive, bufferThreshold, promptName]);
 
   return (
     <div className="p-6 space-y-4">
