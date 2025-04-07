@@ -27,7 +27,7 @@ export default function RealtimeWebSocketPage() {
       let source: MediaStreamAudioSourceNode;
 
       const instructionsText = await fetch("/prompts/instructions.txt").then(res => res.text());
-
+      console.log("Prompt:",instructionsText)
       function encodeToBase64(buffer: ArrayBuffer): string {
         const bytes = new Uint8Array(buffer);
         let binary = "";
