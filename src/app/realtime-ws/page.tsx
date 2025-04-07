@@ -4,14 +4,14 @@
 import { useEffect, useRef, useState } from "react";
 
 export default function RealtimeWebSocketPage() {
-  const audioRef = useRef<HTMLAudioElement>(null);
   const [status, setStatus] = useState("Idle");
   const [isActive, setIsActive] = useState(false);
   const [transcript, setTranscript] = useState<string[]>([]);
-  const currentAudio = useRef<HTMLAudioElement | null>(null);
-  const audioQueue = useRef<string[]>([]);
-  const isPlaying = useRef(false);
   const segmentBuffer = useRef<Uint8Array[]>([]);
+  const audioQueue = useRef<Uint8Array[]>([]);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const nextAudioTime = useRef(0);
+  const BUFFER_THRESHOLD_BYTES = 9600;
 
   useEffect(() => {
     if (!isActive) return;
@@ -78,22 +78,23 @@ export default function RealtimeWebSocketPage() {
       return wavData;
     }
 
-    function playNextAudio() {
-      if (isPlaying.current || audioQueue.current.length === 0) return;
+    function scheduleAudioPlayback(wavBytes: Uint8Array) {
+      const blob = new Blob([wavBytes], { type: "audio/wav" });
+      const fileReader = new FileReader();
+      fileReader.onloadend = () => {
+        const arrayBuffer = fileReader.result as ArrayBuffer;
+        if (!audioContextRef.current) return;
+        audioContextRef.current.decodeAudioData(arrayBuffer, (audioBuffer) => {
+          const source = audioContextRef.current!.createBufferSource();
+          source.buffer = audioBuffer;
+          source.connect(audioContextRef.current!.destination);
 
-      const nextUrl = audioQueue.current.shift();
-      if (!nextUrl) return;
-
-      const audio = new Audio(nextUrl);
-      isPlaying.current = true;
-      currentAudio.current = audio;
-
-      audio.play().catch(console.warn);
-
-      audio.onended = () => {
-        isPlaying.current = false;
-        playNextAudio();
+          const startTime = Math.max(audioContextRef.current!.currentTime, nextAudioTime.current);
+          source.start(startTime);
+          nextAudioTime.current = startTime + audioBuffer.duration;
+        });
       };
+      fileReader.readAsArrayBuffer(blob);
     }
 
     ws.onopen = async () => {
@@ -102,6 +103,7 @@ export default function RealtimeWebSocketPage() {
 
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       audioContext = new AudioContext({ sampleRate: 16000 });
+      audioContextRef.current = new AudioContext({ sampleRate: 24000 });
       await audioContext.audioWorklet.addModule("/audio-processor.worklet.js");
 
       source = audioContext.createMediaStreamSource(stream);
@@ -123,10 +125,13 @@ export default function RealtimeWebSocketPage() {
       ws.send(JSON.stringify({
         type: "session.update",
         session: {
-          instructions: "You are Rico, an insurance Customer from the Phillipines. You are very angry and impatient.",
+          instructions: "You are Rico, an insurance Customer from the Phillipines. You are very angry and impatient. You speak mostly english.",
           input_audio_format: "pcm16",
           output_audio_format: "pcm16",
-          voice: "ash"
+          voice: "ash",
+          input_audio_transcription: {
+            model: "whisper-1"
+          }
         }
       }));
 
@@ -148,7 +153,7 @@ export default function RealtimeWebSocketPage() {
           segmentBuffer.current.push(chunk);
 
           const bufferedLength = segmentBuffer.current.reduce((acc, c) => acc + c.length, 0);
-          if (bufferedLength >= 24000) {
+          if (bufferedLength >= BUFFER_THRESHOLD_BYTES) {
             const segment = new Uint8Array(bufferedLength);
             let offset = 0;
             for (const c of segmentBuffer.current) {
@@ -158,10 +163,7 @@ export default function RealtimeWebSocketPage() {
             segmentBuffer.current = [];
 
             const wavData = createWavFile(segment, 24000);
-            const blob = new Blob([wavData], { type: "audio/wav" });
-            const url = URL.createObjectURL(blob);
-            audioQueue.current.push(url);
-            playNextAudio();
+            scheduleAudioPlayback(wavData);
           }
         } else if (serverEvent.type === "response.audio.done") {
           if (segmentBuffer.current.length > 0) {
@@ -175,10 +177,7 @@ export default function RealtimeWebSocketPage() {
             segmentBuffer.current = [];
 
             const wavData = createWavFile(segment, 24000);
-            const blob = new Blob([wavData], { type: "audio/wav" });
-            const url = URL.createObjectURL(blob);
-            audioQueue.current.push(url);
-            playNextAudio();
+            scheduleAudioPlayback(wavData);
           }
         } else if (serverEvent.type === "response.audio_transcript.done") {
           if (serverEvent.transcript) {
@@ -216,6 +215,7 @@ export default function RealtimeWebSocketPage() {
       if (source) source.disconnect();
       if (workletNode) workletNode.disconnect();
       if (audioContext) audioContext.close();
+      if (audioContextRef.current) audioContextRef.current.close();
       setStatus("Idle");
     };
   }, [isActive]);
@@ -240,7 +240,6 @@ export default function RealtimeWebSocketPage() {
           Stop Chat
         </button>
       </div>
-      <audio ref={audioRef} autoPlay hidden />
 
       {transcript.length > 0 && (
         <div className="mt-6 space-y-2">
