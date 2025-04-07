@@ -34,7 +34,7 @@ export default function RealtimeWebSocketPage() {
       let source: MediaStreamAudioSourceNode;
 
       let instructionsText = "";
-      let settingsJson: Record<string, any> = {};
+      let settingsJson: Record<string, unknown> = {};
       try {
         const basePath = `/prompts/${promptName}`;
 
